@@ -170,6 +170,7 @@ struct iio_backend_ops {
 struct iio_context_pdata;
 struct iio_device_pdata;
 struct iio_channel_pdata;
+struct iio_scan_backend_context;
 
 struct iio_channel_attr {
 	char *name;
