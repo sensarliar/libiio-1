@@ -672,7 +672,7 @@ struct iio_context * usb_create_context(unsigned int bus,
 	struct iio_context *ctx;
 	struct iio_context_pdata *pdata;
 	char err_str[1024];
-	unsigned int i;
+	unsigned int i, setting;
 	int ret;
 
 	pdata = zalloc(sizeof(*pdata));
@@ -741,13 +741,6 @@ struct iio_context * usb_create_context(unsigned int bus,
 
 	libusb_set_auto_detach_kernel_driver(hdl, true);
 
-	ret = libusb_claim_interface(hdl, interface);
-	if (ret) {
-		ret = -(int) libusb_to_errno(ret);
-		ERROR("Unable to claim interface %u: %i\n", interface, ret);
-		goto err_libusb_close;
-	}
-
 	ret = libusb_get_active_config_descriptor(usb_dev, &conf_desc);
 	if (ret) {
 		ret = -(int) libusb_to_errno(ret);
@@ -755,7 +748,23 @@ struct iio_context * usb_create_context(unsigned int bus,
 		goto err_libusb_close;
 	}
 
-	iface = &conf_desc->interface[interface].altsetting[0];
+	ret = iio_usb_match_interface(conf_desc, hdl, interface);
+	if (ret < 0) {
+		ERROR("Device %u.%u.%u is not compatible: %i\n",
+				bus, address, interface, ret);
+		goto err_libusb_close;
+	}
+
+	setting = (unsigned int) ret;
+
+	ret = libusb_claim_interface(hdl, interface);
+	if (ret) {
+		ret = -(int) libusb_to_errno(ret);
+		ERROR("Unable to claim interface %u: %i\n", interface, ret);
+		goto err_libusb_close;
+	}
+
+	iface = &conf_desc->interface[interface].altsetting[setting];
 
 	ret = usb_count_io_eps(iface);
 	if (ret < 0) {
