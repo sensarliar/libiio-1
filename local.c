@@ -266,24 +266,22 @@ static int get_rel_timeout_ms(struct timespec *start, unsigned int timeout_rel)
 	return (int)timeout_rel;
 }
 
-static int device_check_ready(const struct iio_device *dev, short events)
+static int device_check_ready(const struct iio_device *dev, short events,
+	struct timespec *start)
 {
 	struct pollfd pollfd = {
 		.fd = dev->pdata->fd,
 		.events = events,
 	};
 	unsigned int rw_timeout_ms = dev->ctx->pdata->rw_timeout_ms;
-	struct timespec start;
 	int timeout_rel;
 	int ret;
 
 	if (!dev->pdata->blocking)
 		return 0;
 
-	clock_gettime(CLOCK_MONOTONIC, &start);
-
 	do {
-		timeout_rel = get_rel_timeout_ms(&start, rw_timeout_ms);
+		timeout_rel = get_rel_timeout_ms(start, rw_timeout_ms);
 		ret = poll(&pollfd, 1, timeout_rel);
 	} while (ret == -1 && errno == EINTR);
 
@@ -303,6 +301,7 @@ static ssize_t local_read(const struct iio_device *dev,
 {
 	struct iio_device_pdata *pdata = dev->pdata;
 	uintptr_t ptr = (uintptr_t) dst;
+	struct timespec start;
 	ssize_t readsize;
 	ssize_t ret;
 
@@ -316,25 +315,29 @@ static ssize_t local_read(const struct iio_device *dev,
 	if (len == 0)
 		return 0;
 
-	ret = device_check_ready(dev, POLLIN);
-	if (ret < 0)
-		return ret;
+	clock_gettime(CLOCK_MONOTONIC, &start);
 
 	while (len > 0) {
+		ret = device_check_ready(dev, POLLIN, &start);
+		if (ret < 0)
+			break;
+
 		do {
 			ret = read(pdata->fd, (void *) ptr, len);
 		} while (ret == -1 && errno == EINTR);
 
 		if (ret == -1) {
-			ret = -EIO;
-			break;
+			if (!pdata->blocking || errno != EAGAIN) {
+				ret = -EIO;
+				break;
+			}
 		} else if (ret == 0) {
 			ret = -EIO;
 			break;
+		} else if (ret > 0) {
+			ptr += ret;
+			len -= ret;
 		}
-
-		ptr += ret;
-		len -= ret;
 	}
 
 	readsize = (ssize_t)(ptr - (uintptr_t) dst);
@@ -349,6 +352,7 @@ static ssize_t local_write(const struct iio_device *dev,
 {
 	struct iio_device_pdata *pdata = dev->pdata;
 	uintptr_t ptr = (uintptr_t) src;
+	struct timespec start;
 	ssize_t writtensize;
 	ssize_t ret;
 
@@ -358,25 +362,29 @@ static ssize_t local_write(const struct iio_device *dev,
 	if (len == 0)
 		return 0;
 
-	ret = device_check_ready(dev, POLLOUT);
-	if (ret < 0)
-		return ret;
+	clock_gettime(CLOCK_MONOTONIC, &start);
 
 	while (len > 0) {
+		ret = device_check_ready(dev, POLLOUT, &start);
+		if (ret < 0)
+			break;
+
 		do {
 			ret = write(pdata->fd, (void *) ptr, len);
 		} while (ret == -1 && errno == EINTR);
 
 		if (ret == -1) {
-			ret = -EIO;
-			break;
+			if (!pdata->blocking || errno != EAGAIN) {
+				ret = -EIO;
+				break;
+			}
 		} else if (ret == 0) {
 			ret = -EIO;
 			break;
+		} else if (ret > 0) {
+			ptr += ret;
+			len -= ret;
 		}
-
-		ptr += ret;
-		len -= ret;
 	}
 
 	writtensize = (ssize_t)(ptr - (uintptr_t) src);
@@ -420,6 +428,7 @@ static ssize_t local_get_buffer(const struct iio_device *dev,
 {
 	struct block block;
 	struct iio_device_pdata *pdata = dev->pdata;
+	struct timespec start;
 	char err_str[1024];
 	int f = pdata->fd;
 	ssize_t ret;
@@ -457,12 +466,17 @@ static ssize_t local_get_buffer(const struct iio_device *dev,
 		}
 	}
 
-	ret = (ssize_t) device_check_ready(dev, POLLIN | POLLOUT);
-	if (ret < 0)
-		return ret;
+	clock_gettime(CLOCK_MONOTONIC, &start);
 
-	memset(&block, 0, sizeof(block));
-	ret = (ssize_t) ioctl_nointr(f, BLOCK_DEQUEUE_IOCTL, &block);
+	do {
+		ret = (ssize_t) device_check_ready(dev, POLLIN | POLLOUT, &start);
+		if (ret < 0)
+			return ret;
+
+		memset(&block, 0, sizeof(block));
+		ret = (ssize_t) ioctl_nointr(f, BLOCK_DEQUEUE_IOCTL, &block);
+	} while (pdata->blocking && ret == -1 && errno == EAGAIN);
+
 	if (ret) {
 		ret = (ssize_t) -errno;
 		iio_strerror(errno, err_str, sizeof(err_str));
@@ -810,7 +824,7 @@ static int local_open(const struct iio_device *dev,
 		return ret;
 
 	snprintf(buf, sizeof(buf), "/dev/%s", dev->id);
-	pdata->fd = open(buf, O_RDWR | O_CLOEXEC);
+	pdata->fd = open(buf, O_RDWR | O_CLOEXEC | O_NONBLOCK);
 	if (pdata->fd == -1)
 		return -errno;
 
@@ -906,19 +920,15 @@ static int local_get_fd(const struct iio_device *dev)
 
 static int local_set_blocking_mode(const struct iio_device *dev, bool blocking)
 {
-	int ret;
-
 	if (dev->pdata->fd == -1)
 		return -EBADF;
 
 	if (dev->pdata->cyclic)
 		return -EPERM;
 
-	ret = set_blocking_mode(dev->pdata->fd, blocking);
-	if (ret == 0)
-		dev->pdata->blocking = blocking;
+	dev->pdata->blocking = blocking;
 
-	return ret;
+	return 0;
 }
 
 static int local_get_trigger(const struct iio_device *dev,
