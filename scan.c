@@ -23,6 +23,12 @@ ssize_t iio_scan_contexts(struct iio_context_info ***info)
 	struct iio_scan_result scan_result = { 0, NULL };
 	int ret;
 
+#if LOCAL_BACKEND
+	ret = local_context_scan(&scan_result);
+	if (ret < 0)
+		goto err_free;
+#endif
+
 	*info = scan_result.info;
 
 	return (ssize_t) scan_result.size;
