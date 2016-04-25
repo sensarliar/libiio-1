@@ -282,6 +282,7 @@ struct iio_context * usb_create_context_from_uri(const char *uri);
 struct iio_context * serial_create_context_from_uri(const char *uri);
 
 int local_context_scan(struct iio_scan_result *scan_result);
+int usb_context_scan(struct iio_scan_result *scan_result);
 
 /* This function is not part of the API, but is used by the IIO daemon */
 __api ssize_t iio_device_get_sample_size_mask(const struct iio_device *dev,

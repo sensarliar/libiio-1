@@ -29,6 +29,12 @@ ssize_t iio_scan_contexts(struct iio_context_info ***info)
 		goto err_free;
 #endif
 
+#if USB_BACKEND
+	ret = usb_context_scan(&scan_result);
+	if (ret < 0)
+		goto err_free;
+#endif
+
 	*info = scan_result.info;
 
 	return (ssize_t) scan_result.size;
