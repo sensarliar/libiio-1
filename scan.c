@@ -39,7 +39,8 @@ ssize_t iio_scan_contexts(struct iio_context_info ***info)
 
 	return (ssize_t) scan_result.size;
 err_free:
-	iio_context_info_list_free(scan_result.info);
+	if (scan_result.info)
+		iio_context_info_list_free(scan_result.info);
 	return ret;
 }
 
