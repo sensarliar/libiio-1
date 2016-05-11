@@ -1201,3 +1201,149 @@ err_free_addrinfo:
 	freeaddrinfo(res);
 	return NULL;
 }
+
+struct iio_scan_backend_context {
+	void (*cb)(const char *uri, const char *description,
+			bool connected, void *user_data);
+	void *user_data;
+	bool has_event;
+
+#ifdef HAVE_AVAHI
+	AvahiClient *client;
+	AvahiServiceBrowser *browser;
+	AvahiSimplePoll *poll;
+#endif
+};
+
+#ifdef HAVE_AVAHI
+static void scan_resolver_cb(AvahiServiceResolver *resolver,
+		AvahiIfIndex iface, AvahiProtocol proto,
+		AvahiResolverEvent event, const char *name,
+		const char *type, const char *domain,
+		const char *host_name, const AvahiAddress *address,
+		uint16_t port, AvahiStringList *txt,
+		AvahiLookupResultFlags flags, void *d)
+{
+	struct iio_scan_backend_context *ctx = d;
+	char uri[AVAHI_ADDRESS_STR_MAX + sizeof("ip:")];
+
+	strncpy(uri, "ip:", sizeof("ip:"));
+	avahi_address_snprint((char *)((uintptr_t) uri + sizeof("ip:") - 1),
+			AVAHI_ADDRESS_STR_MAX, address);
+
+	ctx->cb(uri, "", true, ctx->user_data);
+	ctx->has_event = true;
+}
+
+static void scan_browser_cb(AvahiServiceBrowser *browser,
+		AvahiIfIndex iface, AvahiProtocol proto,
+		AvahiBrowserEvent event, const char *name,
+		const char *type, const char *domain,
+		AvahiLookupResultFlags flags, void *d)
+{
+	struct iio_scan_backend_context *ctx = d;
+	struct AvahiClient *client = avahi_service_browser_get_client(browser);
+
+	switch (event) {
+	default:
+	case AVAHI_BROWSER_NEW:
+		avahi_service_resolver_new(client, iface,
+				proto, name, type, domain,
+				AVAHI_PROTO_UNSPEC, 0,
+				scan_resolver_cb, ctx);
+		break;
+	case AVAHI_BROWSER_FAILURE: /* fall-through */
+		avahi_simple_poll_quit(ctx->poll);
+	case AVAHI_BROWSER_CACHE_EXHAUSTED: /* fall-through */
+	case AVAHI_BROWSER_ALL_FOR_NOW:
+		break;
+	}
+}
+
+static int populate_context(struct iio_scan_backend_context *ctx)
+{
+	int ret;
+
+	ctx->poll = avahi_simple_poll_new();
+	if (!ctx->poll)
+		return -ENOMEM;
+
+	ctx->client = avahi_client_new(avahi_simple_poll_get(ctx->poll),
+			0, NULL, NULL, &ret);
+	if (!ctx->client) {
+		ERROR("Unable to start ZeroConf client :%s\n",
+				avahi_strerror(ret));
+		goto err_free_poll;
+	}
+
+	ctx->browser = avahi_service_browser_new(ctx->client,
+			AVAHI_IF_UNSPEC, AVAHI_PROTO_UNSPEC,
+			"_iio._tcp", NULL, 0, scan_browser_cb, ctx);
+	if (!ctx->browser) {
+		ret = avahi_client_errno(ctx->client);
+		ERROR("Unable to create ZeroConf browser: %s\n",
+				avahi_strerror(ret));
+		goto err_free_client;
+	}
+
+	return 0;
+
+err_free_client:
+	avahi_client_free(ctx->client);
+err_free_poll:
+	avahi_simple_poll_free(ctx->poll);
+	return -ret; /* we want a negative error code */
+}
+#endif
+
+struct iio_scan_backend_context * network_scan_create(
+		void (*cb)(const char *, const char *, bool, void *),
+		void *user_data)
+{
+	struct iio_scan_backend_context *ctx;
+#ifdef HAVE_AVAHI
+	int ret;
+#endif
+
+	ctx = malloc(sizeof(*ctx));
+	if (!ctx) {
+		errno = ENOMEM;
+		return NULL;
+	}
+
+	ctx->user_data = user_data;
+	ctx->cb = cb;
+
+#ifdef HAVE_AVAHI
+	ret = populate_context(ctx);
+	if (ret < 0) {
+		free(ctx);
+		errno = -ret;
+		return NULL;
+	}
+#endif
+
+	return ctx;
+}
+
+void network_scan_destroy(struct iio_scan_backend_context *ctx)
+{
+#ifdef HAVE_AVAHI
+	avahi_service_browser_free(ctx->browser);
+	avahi_client_free(ctx->client);
+	avahi_simple_poll_free(ctx->poll);
+#endif
+
+	free(ctx);
+}
+
+bool network_scan_poll(struct iio_scan_backend_context *ctx)
+{
+#ifdef HAVE_AVAHI
+	ctx->has_event = false;
+	avahi_simple_poll_iterate(ctx->poll, 0);
+	return ctx->has_event;
+#else
+	return false;
+#endif
+}

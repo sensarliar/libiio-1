@@ -20,6 +20,9 @@
 #include <errno.h>
 
 struct iio_scan_context {
+#if NETWORK_BACKEND
+	struct iio_scan_backend_context *ip_ctx;
+#endif
 #if USB_BACKEND
 	struct iio_scan_backend_context *usb_ctx;
 #else
@@ -39,6 +42,9 @@ struct iio_scan_context * iio_create_scan_context(
 		return NULL;
 	}
 
+#if NETWORK_BACKEND
+	ctx->ip_ctx = network_scan_create(cb, user_data);
+#endif
 #if USB_BACKEND
 	ctx->usb_ctx = usb_scan_create(cb, user_data);
 #endif
@@ -48,6 +54,10 @@ struct iio_scan_context * iio_create_scan_context(
 
 void iio_scan_context_destroy(struct iio_scan_context *ctx)
 {
+#if NETWORK_BACKEND
+	if (ctx->ip_ctx)
+		network_scan_destroy(ctx->ip_ctx);
+#endif
 #if USB_BACKEND
 	if (ctx->usb_ctx)
 		usb_scan_destroy(ctx->usb_ctx);
@@ -57,6 +67,10 @@ void iio_scan_context_destroy(struct iio_scan_context *ctx)
 
 bool iio_scan_context_poll(struct iio_scan_context *ctx)
 {
+#if NETWORK_BACKEND
+	if (ctx->ip_ctx && network_scan_poll(ctx->ip_ctx))
+		return true;
+#endif
 #if USB_BACKEND
 	if (ctx->usb_ctx && usb_scan_poll(ctx->usb_ctx))
 		return true;
