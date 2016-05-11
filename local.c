@@ -1679,3 +1679,18 @@ err_set_errno:
 	errno = -ret;
 	return NULL;
 }
+
+static int check_device(void *d, const char *path)
+{
+	*(bool *)d = true;
+	return 0;
+}
+
+bool local_context_possible(void)
+{
+	bool exists = false;
+
+	foreach_in_dir(&exists, "/sys/bus/iio/devices", true, check_device);
+
+	return exists;
+}

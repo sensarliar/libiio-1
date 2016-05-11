@@ -42,6 +42,10 @@ struct iio_scan_context * iio_create_scan_context(
 		return NULL;
 	}
 
+#if LOCAL_BACKEND
+	if (local_context_possible())
+		(*cb)("local:", "Local devices", true, user_data);
+#endif
 #if NETWORK_BACKEND
 	ctx->ip_ctx = network_scan_create(cb, user_data);
 #endif
