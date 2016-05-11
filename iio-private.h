@@ -171,6 +171,9 @@ struct iio_context_pdata;
 struct iio_device_pdata;
 struct iio_channel_pdata;
 
+struct iio_scan_context;
+struct iio_scan_backend_context;
+
 struct iio_channel_attr {
 	char *name;
 	char *filename;
@@ -244,6 +247,11 @@ struct iio_scan_result {
 	size_t size;
 	struct iio_context_info **info;
 };
+
+struct iio_scan_backend_context * usb_scan_create(
+		void (*cb)(const char *, bool));
+void usb_scan_destroy(struct iio_scan_backend_context *ctx);
+int usb_scan_poll(struct iio_scan_backend_context *ctx);
 
 struct iio_context_info **iio_scan_result_add(
 	struct iio_scan_result *scan_result, size_t num);

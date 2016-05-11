@@ -17,6 +17,7 @@
 
 #include "iio-private.h"
 
+#include <errno.h>
 
 ssize_t iio_scan_contexts(struct iio_context_info ***info)
 {
@@ -94,4 +95,47 @@ struct iio_context_info **iio_scan_result_add(
 	scan_result->size = new_size;
 
 	return &info[old_size];
+}
+
+struct iio_scan_context {
+#if USB_BACKEND
+	struct iio_scan_backend_context *usb_ctx;
+#else
+	int foo; /* avoid complaints about empty structure */
+#endif
+};
+
+struct iio_scan_context * iio_create_scan_context(
+		void (*cb)(const char *uri, bool connected))
+{
+	struct iio_scan_context *ctx = malloc(sizeof(*ctx));
+
+	if (!ctx) {
+		errno = ENOMEM;
+		return NULL;
+	}
+
+#if USB_BACKEND
+	ctx->usb_ctx = usb_scan_create(cb);
+#endif
+
+	return ctx;
+}
+
+void iio_scan_context_destroy(struct iio_scan_context *ctx)
+{
+#if USB_BACKEND
+	usb_scan_destroy(ctx->usb_ctx);
+#endif
+	free(ctx);
+}
+
+int iio_scan_context_poll(struct iio_scan_context *ctx)
+{
+#if USB_BACKEND
+	int ret = usb_scan_poll(ctx->usb_ctx);
+	if (ret)
+		return ret;
+#endif
+	return 0;
 }

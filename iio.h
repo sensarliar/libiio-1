@@ -69,6 +69,7 @@ struct iio_context_info;
 struct iio_device;
 struct iio_channel;
 struct iio_buffer;
+struct iio_scan_context;
 
 
 /* ---------------------------------------------------------------------------*/
@@ -91,6 +92,37 @@ __api void iio_library_get_version(unsigned int *major,
  * corresponding to the error message will be stored
  * @param len The available length of the memory area, in bytes */
 __api void iio_strerror(int err, char *dst, size_t len);
+
+
+/** @} *//* ------------------------------------------------------------------*/
+/* ------------------------- Scan functions ----------------------------------*/
+/** @defgroup Scan Functions for scanning available contexts
+ * @{
+ * @struct iio_scan_context
+ * @brief The scanning context */
+
+
+/** @brief Create a scan context
+ * @param cb A pointer to the function that will be called when IIO contexts
+ * appear/disappear
+ * @return on success, a pointer to a iio_scan_context structure
+ * @return On failure, NULL is returned and errno is set appropriately */
+__api struct iio_scan_context * iio_create_scan_context(
+		void (*cb)(const char *uri, bool connected));
+
+
+/** @brief Destroy the given scan context
+ * @param ctx A pointer to an iio_scan_context structure
+ *
+ * <b>NOTE:</b> After that function, the iio_scan_context pointer shall be invalid. */
+__api void iio_scan_context_destroy(struct iio_scan_context *ctx);
+
+
+/** @brief Poll for connected or disconnected contexts
+ * @param ctx A pointer to an iio_scan_context structure
+ * @return On success, 0 is returned
+ * @return On error, a negative errno code is returned */
+__api int iio_scan_context_poll(struct iio_scan_context *ctx);
 
 
 /** @} *//* ------------------------------------------------------------------*/
