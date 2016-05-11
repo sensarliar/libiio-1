@@ -235,6 +235,12 @@ struct iio_buffer {
 	bool is_output, dev_is_high_speed;
 };
 
+struct iio_scan_backend_context * usb_scan_create(
+		void (*cb)(const char *, const char *, bool, void *),
+		void *user_data);
+void usb_scan_destroy(struct iio_scan_backend_context *ctx);
+bool usb_scan_poll(struct iio_scan_backend_context *ctx);
+
 void free_channel(struct iio_channel *chn);
 void free_device(struct iio_device *dev);
 

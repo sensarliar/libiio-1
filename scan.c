@@ -20,7 +20,11 @@
 #include <errno.h>
 
 struct iio_scan_context {
+#if USB_BACKEND
+	struct iio_scan_backend_context *usb_ctx;
+#else
 	int foo; /* avoid complaints about empty structure */
+#endif
 };
 
 struct iio_scan_context * iio_create_scan_context(
@@ -35,15 +39,27 @@ struct iio_scan_context * iio_create_scan_context(
 		return NULL;
 	}
 
+#if USB_BACKEND
+	ctx->usb_ctx = usb_scan_create(cb, user_data);
+#endif
+
 	return ctx;
 }
 
 void iio_scan_context_destroy(struct iio_scan_context *ctx)
 {
+#if USB_BACKEND
+	if (ctx->usb_ctx)
+		usb_scan_destroy(ctx->usb_ctx);
+#endif
 	free(ctx);
 }
 
 bool iio_scan_context_poll(struct iio_scan_context *ctx)
 {
+#if USB_BACKEND
+	if (ctx->usb_ctx && usb_scan_poll(ctx->usb_ctx))
+		return true;
+#endif
 	return false;
 }

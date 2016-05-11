@@ -37,6 +37,8 @@
 /* Endpoint for non-streaming operations */
 #define EP_OPS		1
 
+#define IIO_INTERFACE_NAME	"IIO"
+
 struct iio_usb_io_endpoint {
 	unsigned char address;
 	bool in_use;
@@ -390,6 +392,66 @@ static void usb_shutdown(struct iio_context *ctx)
 	free(ctx->pdata);
 }
 
+static int iio_usb_match_interface(const struct libusb_config_descriptor *desc,
+		struct libusb_device_handle *hdl, unsigned int interface)
+{
+	const struct libusb_interface *iface;
+	unsigned int i;
+
+	if (interface >= desc->bNumInterfaces)
+		return -EINVAL;
+
+	iface = &desc->interface[interface];
+
+	for (i = 0; i < (unsigned int) iface->num_altsetting; i++) {
+		const struct libusb_interface_descriptor *idesc =
+			&iface->altsetting[i];
+		char name[64];
+		int ret;
+
+		if (idesc->iInterface == 0)
+			continue;
+
+		ret = libusb_get_string_descriptor_ascii(hdl, idesc->iInterface,
+				(unsigned char *) name, sizeof(name));
+		if (ret < 0)
+			return ret;
+
+		if (!strcmp(name, IIO_INTERFACE_NAME))
+			return (int) i;
+	}
+
+	return -EPERM;
+}
+
+static int iio_usb_match_device(struct libusb_device *dev,
+		struct libusb_device_handle *hdl,
+		unsigned int *interface)
+{
+	struct libusb_config_descriptor *desc;
+	unsigned int i;
+	int ret;
+
+	ret = libusb_get_active_config_descriptor(dev, &desc);
+	if (ret)
+		return -(int) libusb_to_errno(ret);
+
+	for (i = 0, ret = -EPERM; ret == -EPERM &&
+			i < desc->bNumInterfaces; i++)
+		ret = iio_usb_match_interface(desc, hdl, i);
+
+	libusb_free_config_descriptor(desc);
+	if (ret < 0)
+		return ret;
+
+	DEBUG("Found IIO interface on device %u:%u using interface %u\n",
+			libusb_get_bus_number(dev),
+			libusb_get_device_address(dev), i - 1);
+
+	*interface = i - 1;
+	return ret;
+}
+
 static const struct iio_backend_ops usb_ops = {
 	.get_version = usb_get_version,
 	.open = usb_open,
@@ -726,4 +788,233 @@ err_bad_uri:
 	ERROR("Bad URI: \'%s\'\n", uri);
 	errno = -EINVAL;
 	return NULL;
+}
+
+struct connected_device {
+	struct connected_device *next;
+	struct libusb_device *dev;
+	char *uri, *description;
+};
+
+struct iio_scan_backend_context {
+	void (*cb)(const char *uri, const char *description,
+			bool connected, void *user_data);
+	libusb_context *ctx;
+	libusb_hotplug_callback_handle hdl;
+
+	void *user_data;
+	struct connected_device *connected_devices;
+	bool has_event;
+};
+
+static int usb_hotplug_add_device(struct iio_scan_backend_context *ctx,
+		struct libusb_device *dev, struct libusb_device_handle *hdl,
+		unsigned int interface)
+{
+	char manufacturer[64], product[64];
+	char uri[sizeof("usb:127.255.255")];
+	char description[64 + 64 + sizeof("0000:0000 ( )")];
+	struct connected_device *connected_dev;
+	struct libusb_device_descriptor desc;
+	int ret;
+
+	libusb_get_device_descriptor(dev, &desc);
+
+	if (desc.iManufacturer == 0) {
+		manufacturer[0] = '\0';
+	} else {
+		ret = libusb_get_string_descriptor_ascii(hdl,
+				desc.iManufacturer,
+				(unsigned char *) manufacturer,
+				sizeof(manufacturer));
+		if (ret < 0)
+			manufacturer[0] = '\0';
+	}
+
+	if (desc.iProduct == 0) {
+		product[0] = '\0';
+	} else {
+		ret = libusb_get_string_descriptor_ascii(hdl, desc.iProduct,
+				(unsigned char *) product, sizeof(product));
+		if (ret < 0)
+			product[0] = '\0';
+	}
+
+	ret = snprintf(description, sizeof(description), "%04x:%04x (%s %s)",
+			desc.idVendor, desc.idProduct, manufacturer, product);
+	if (ret < 0)
+		return ret;
+
+	ret = snprintf(uri, sizeof(uri), "usb:%d.%d.%u",
+			libusb_get_bus_number(dev),
+			libusb_get_device_address(dev),
+			interface);
+	if (ret < 0)
+		return ret;
+
+	connected_dev = malloc(sizeof(*connected_dev));
+	if (!connected_dev)
+		return -ENOMEM;
+
+	connected_dev->uri = strdup(uri);
+	if (!connected_dev->uri)
+		goto err_free_connected_dev;
+
+	connected_dev->description = strdup(description);
+	if (!connected_dev->description)
+		goto err_free_uri;
+
+	connected_dev->dev = dev;
+	connected_dev->next = ctx->connected_devices;
+	ctx->connected_devices = connected_dev;
+
+	DEBUG("Device %s with URI %s connected\n", description, uri);
+	ctx->cb(uri, description, true, ctx->user_data);
+	ctx->has_event = true;
+
+	return 0;
+
+err_free_uri:
+	free(connected_dev->uri);
+err_free_connected_dev:
+	free(connected_dev);
+	return -ENOMEM;
+}
+
+static int usb_hotplug_cb(struct libusb_context *usb_ctx,
+		struct libusb_device *dev, libusb_hotplug_event event,
+		void *user_data)
+{
+	struct iio_scan_backend_context *ctx = user_data;
+
+	if (event == LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED) {
+		unsigned int interface = 0;
+		struct libusb_device_handle *hdl;
+		int ret;
+
+		ret = libusb_open(dev, &hdl);
+		if (ret)
+			return -(int) libusb_to_errno(ret);
+
+		ret = iio_usb_match_device(dev, hdl, &interface);
+		if (ret) {
+			libusb_close(hdl);
+		} else {
+			ret = usb_hotplug_add_device(ctx, dev, hdl, interface);
+			libusb_close(hdl);
+			if (ret < 0)
+				return ret;
+		}
+	} else {
+		struct connected_device *connected_dev, *prev;
+
+		for (connected_dev = ctx->connected_devices, prev = NULL;
+				connected_dev && connected_dev->dev != dev;
+				prev = connected_dev,
+				connected_dev = connected_dev->next);
+
+		if (connected_dev) {
+			if (prev)
+				prev->next = connected_dev->next;
+			else
+				ctx->connected_devices = connected_dev->next;
+
+			DEBUG("Device %s with URI %s disconnected\n",
+					connected_dev->description,
+					connected_dev->uri);
+			ctx->cb(connected_dev->uri, connected_dev->description,
+					false, ctx->user_data);
+
+			free(connected_dev->description);
+			free(connected_dev->uri);
+			free(connected_dev);
+			ctx->has_event = true;
+		}
+	}
+
+	return 0;
+}
+
+struct iio_scan_backend_context * usb_scan_create(
+		void (*cb)(const char *, const char *, bool, void *),
+		void *user_data)
+{
+	struct iio_scan_backend_context *ctx;
+	int ret;
+
+	if (!libusb_has_capability(LIBUSB_CAP_HAS_HOTPLUG)) {
+		WARNING("USB hot-plug is not supported on this system\n");
+		errno = ENOSYS;
+		return NULL;
+	}
+
+	ctx = malloc(sizeof(*ctx));
+	if (!ctx) {
+		errno = ENOMEM;
+		return NULL;
+	}
+
+	ctx->user_data = user_data;
+	ctx->cb = cb;
+	ctx->connected_devices = NULL;
+
+	ret = libusb_init(&ctx->ctx);
+	if (ret) {
+		ret = -(int) libusb_to_errno(ret);
+		ERROR("Unable to init libusb: %i\n", ret);
+		goto err_free_ctx;
+	}
+
+	ret = libusb_hotplug_register_callback(ctx->ctx,
+			LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED |
+			LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT,
+			LIBUSB_HOTPLUG_ENUMERATE,
+			LIBUSB_HOTPLUG_MATCH_ANY,
+			LIBUSB_HOTPLUG_MATCH_ANY,
+			LIBUSB_HOTPLUG_MATCH_ANY,
+			usb_hotplug_cb,
+			ctx, &ctx->hdl);
+	if (ret) {
+		ret = -(int) libusb_to_errno(ret);
+		ERROR("Unable to create hotplug callback: %i\n", ret);
+		goto err_libusb_exit;
+	}
+
+	return ctx;
+
+err_libusb_exit:
+	libusb_exit(ctx->ctx);
+err_free_ctx:
+	free(ctx);
+	errno = -ret;
+	return NULL;
+}
+
+void usb_scan_destroy(struct iio_scan_backend_context *ctx)
+{
+	struct connected_device *dev = ctx->connected_devices;
+
+	libusb_hotplug_deregister_callback(ctx->ctx, ctx->hdl);
+	libusb_exit(ctx->ctx);
+
+	while (dev) {
+		struct connected_device *next = dev->next;
+
+		free(dev);
+		dev = next;
+	}
+
+	free(ctx);
+}
+
+bool usb_scan_poll(struct iio_scan_backend_context *ctx)
+{
+	struct timeval tv;
+
+	tv.tv_sec = 0;
+	tv.tv_usec = 0;
+	ctx->has_event = false;
+
+	libusb_handle_events_timeout_completed(ctx->ctx, &tv, NULL);
+	return ctx->has_event;
 }
