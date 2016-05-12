@@ -1300,10 +1300,9 @@ struct iio_scan_backend_context * network_scan_create(
 		void (*cb)(const char *, const char *, bool, void *),
 		void *user_data)
 {
-	struct iio_scan_backend_context *ctx;
 #ifdef HAVE_AVAHI
+	struct iio_scan_backend_context *ctx;
 	int ret;
-#endif
 
 	ctx = malloc(sizeof(*ctx));
 	if (!ctx) {
@@ -1314,16 +1313,18 @@ struct iio_scan_backend_context * network_scan_create(
 	ctx->user_data = user_data;
 	ctx->cb = cb;
 
-#ifdef HAVE_AVAHI
 	ret = populate_context(ctx);
 	if (ret < 0) {
 		free(ctx);
 		errno = -ret;
 		return NULL;
 	}
-#endif
 
 	return ctx;
+#else
+	errno = ENOSYS;
+	return NULL;
+#endif
 }
 
 void network_scan_destroy(struct iio_scan_backend_context *ctx)
@@ -1344,6 +1345,8 @@ bool network_scan_poll(struct iio_scan_backend_context *ctx)
 	avahi_simple_poll_iterate(ctx->poll, 0);
 	return ctx->has_event;
 #else
+	/* This will never happen - scan.c will only call network_scan_poll() if
+	 * Avahi is available */
 	return false;
 #endif
 }

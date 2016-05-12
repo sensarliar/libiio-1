@@ -46,11 +46,24 @@ struct iio_scan_context * iio_create_scan_context(
 	if (local_context_possible())
 		(*cb)("local:", "Local devices", true, user_data);
 #endif
+
 #if NETWORK_BACKEND
 	ctx->ip_ctx = network_scan_create(cb, user_data);
+	if (!ctx->ip_ctx && errno != ENOSYS) {
+		free(ctx);
+		return NULL;
+	}
 #endif
+
 #if USB_BACKEND
 	ctx->usb_ctx = usb_scan_create(cb, user_data);
+	if (!ctx->usb_ctx && errno != ENOSYS) {
+#if NETWORK_BACKEND
+		network_scan_destroy(ctx->ip_ctx);
+#endif
+		free(ctx);
+		return NULL;
+	}
 #endif
 
 	return ctx;
