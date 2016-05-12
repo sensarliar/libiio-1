@@ -25,6 +25,11 @@ struct iio_scan_context {
 #endif
 #if USB_BACKEND
 	struct iio_scan_backend_context *usb_ctx;
+#endif
+#if LOCAL_BACKEND
+	void (*cb)(const char *, const char *, bool, void *);
+	void *user_data;
+	bool print_local_context;
 #else
 	int foo; /* avoid complaints about empty structure */
 #endif
@@ -43,8 +48,9 @@ struct iio_scan_context * iio_create_scan_context(
 	}
 
 #if LOCAL_BACKEND
-	if (local_context_possible())
-		(*cb)("local:", "Local devices", true, user_data);
+	ctx->cb = cb;
+	ctx->user_data = user_data;
+	ctx->print_local_context = local_context_possible();
 #endif
 
 #if NETWORK_BACKEND
@@ -85,6 +91,14 @@ void iio_scan_context_destroy(struct iio_scan_context *ctx)
 unsigned int iio_scan_context_poll(struct iio_scan_context *ctx)
 {
 	unsigned int nb_events = 0;
+
+#if LOCAL_BACKEND
+	if (ctx->print_local_context) {
+		(*ctx->cb)("local:", "Local devices", true, ctx->user_data);
+		ctx->print_local_context = false;
+		nb_events++;
+	}
+#endif
 
 #if NETWORK_BACKEND
 	if (ctx->ip_ctx)
