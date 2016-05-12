@@ -803,6 +803,7 @@ struct connected_device {
 	struct connected_device *next;
 	struct libusb_device *dev;
 	char *uri, *description;
+	bool cb_called;
 };
 
 struct iio_scan_backend_context {
@@ -813,7 +814,7 @@ struct iio_scan_backend_context {
 
 	void *user_data;
 	struct connected_device *connected_devices;
-	bool has_event;
+	bool has_event, call_cb, enumerate;
 };
 
 static int usb_hotplug_add_device(struct iio_scan_backend_context *ctx,
@@ -876,10 +877,13 @@ static int usb_hotplug_add_device(struct iio_scan_backend_context *ctx,
 	connected_dev->dev = dev;
 	connected_dev->next = ctx->connected_devices;
 	ctx->connected_devices = connected_dev;
+	connected_dev->cb_called = ctx->call_cb;
 
 	DEBUG("Device %s with URI %s connected\n", description, uri);
-	ctx->cb(uri, description, true, ctx->user_data);
-	ctx->has_event = true;
+	if (ctx->call_cb) {
+		ctx->cb(uri, description, true, ctx->user_data);
+		ctx->has_event = true;
+	}
 
 	return 0;
 
@@ -965,6 +969,8 @@ struct iio_scan_backend_context * usb_scan_create(
 
 	ctx->user_data = user_data;
 	ctx->cb = cb;
+	ctx->call_cb = false;
+	ctx->enumerate = true;
 	ctx->connected_devices = NULL;
 
 	ret = libusb_init(&ctx->ctx);
@@ -989,6 +995,7 @@ struct iio_scan_backend_context * usb_scan_create(
 		goto err_libusb_exit;
 	}
 
+	ctx->call_cb = true;
 	return ctx;
 
 err_libusb_exit:
@@ -1023,6 +1030,24 @@ bool usb_scan_poll(struct iio_scan_backend_context *ctx)
 	tv.tv_sec = 0;
 	tv.tv_usec = 0;
 	ctx->has_event = false;
+
+	if (ctx->enumerate) {
+		struct connected_device *dev;
+
+		for (dev = ctx->connected_devices; dev; dev = dev->next) {
+			if (!dev->cb_called) {
+				ctx->cb(dev->uri, dev->description,
+						true, ctx->user_data);
+				dev->cb_called = true;
+				ctx->has_event = true;
+			}
+		}
+
+		ctx->enumerate = false;
+
+		if (ctx->has_event)
+			return true;
+	}
 
 	libusb_handle_events_timeout_completed(ctx->ctx, &tv, NULL);
 	return ctx->has_event;
