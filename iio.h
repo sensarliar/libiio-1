@@ -122,8 +122,8 @@ __api void iio_scan_context_destroy(struct iio_scan_context *ctx);
 
 /** @brief Poll for connected or disconnected contexts
  * @param ctx A pointer to an iio_scan_context structure
- * @return True if a context connected or disconnected, False otherwise */
-__api bool iio_scan_context_poll(struct iio_scan_context *ctx);
+ * @return The number of times the callback was called */
+__api unsigned int iio_scan_context_poll(struct iio_scan_context *ctx);
 
 
 /** @} *//* ------------------------------------------------------------------*/

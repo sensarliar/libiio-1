@@ -1206,7 +1206,7 @@ struct iio_scan_backend_context {
 	void (*cb)(const char *uri, const char *description,
 			bool connected, void *user_data);
 	void *user_data;
-	bool has_event;
+	unsigned int nb_events;
 
 #ifdef HAVE_AVAHI
 	AvahiClient *client;
@@ -1232,7 +1232,7 @@ static void scan_resolver_cb(AvahiServiceResolver *resolver,
 			AVAHI_ADDRESS_STR_MAX, address);
 
 	ctx->cb(uri, "", true, ctx->user_data);
-	ctx->has_event = true;
+	ctx->nb_events++;
 }
 
 static void scan_browser_cb(AvahiServiceBrowser *browser,
@@ -1338,15 +1338,15 @@ void network_scan_destroy(struct iio_scan_backend_context *ctx)
 	free(ctx);
 }
 
-bool network_scan_poll(struct iio_scan_backend_context *ctx)
+unsigned int network_scan_poll(struct iio_scan_backend_context *ctx)
 {
 #ifdef HAVE_AVAHI
-	ctx->has_event = false;
+	ctx->nb_events = 0;
 	avahi_simple_poll_iterate(ctx->poll, 0);
-	return ctx->has_event;
+	return ctx->nb_events;
 #else
 	/* This will never happen - scan.c will only call network_scan_poll() if
 	 * Avahi is available */
-	return false;
+	return 0;
 #endif
 }

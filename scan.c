@@ -82,15 +82,19 @@ void iio_scan_context_destroy(struct iio_scan_context *ctx)
 	free(ctx);
 }
 
-bool iio_scan_context_poll(struct iio_scan_context *ctx)
+unsigned int iio_scan_context_poll(struct iio_scan_context *ctx)
 {
+	unsigned int nb_events = 0;
+
 #if NETWORK_BACKEND
-	if (ctx->ip_ctx && network_scan_poll(ctx->ip_ctx))
-		return true;
+	if (ctx->ip_ctx)
+		nb_events += network_scan_poll(ctx->ip_ctx);
 #endif
+
 #if USB_BACKEND
-	if (ctx->usb_ctx && usb_scan_poll(ctx->usb_ctx))
-		return true;
+	if (ctx->usb_ctx)
+		nb_events += usb_scan_poll(ctx->usb_ctx);
 #endif
-	return false;
+
+	return nb_events;
 }
