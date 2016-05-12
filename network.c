@@ -1338,11 +1338,12 @@ void network_scan_destroy(struct iio_scan_backend_context *ctx)
 	free(ctx);
 }
 
-unsigned int network_scan_poll(struct iio_scan_backend_context *ctx)
+unsigned int network_scan_poll(struct iio_scan_backend_context *ctx,
+		unsigned int timeout_ms)
 {
 #ifdef HAVE_AVAHI
 	ctx->nb_events = 0;
-	avahi_simple_poll_iterate(ctx->poll, 0);
+	avahi_simple_poll_iterate(ctx->poll, timeout_ms);
 	return ctx->nb_events;
 #else
 	/* This will never happen - scan.c will only call network_scan_poll() if

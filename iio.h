@@ -122,8 +122,13 @@ __api void iio_scan_context_destroy(struct iio_scan_context *ctx);
 
 /** @brief Poll for connected or disconnected contexts
  * @param ctx A pointer to an iio_scan_context structure
- * @return The number of times the callback was called */
-__api unsigned int iio_scan_context_poll(struct iio_scan_context *ctx);
+ * @param timeout_ms A positive integer representing the time in milliseconds
+ * after which a timeout occurs. A value of 0 is used to specify that this call
+ * should not block and just handle any pre-existing events.
+ * @return The number of times the callback was called, or zero if the timeout
+ * expired */
+__api unsigned int iio_scan_context_poll(struct iio_scan_context *ctx,
+		unsigned int timeout_ms);
 
 
 /** @} *//* ------------------------------------------------------------------*/

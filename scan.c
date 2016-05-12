@@ -88,7 +88,8 @@ void iio_scan_context_destroy(struct iio_scan_context *ctx)
 	free(ctx);
 }
 
-unsigned int iio_scan_context_poll(struct iio_scan_context *ctx)
+unsigned int iio_scan_context_poll(struct iio_scan_context *ctx,
+		unsigned int timeout_ms)
 {
 	unsigned int nb_events = 0;
 
@@ -100,14 +101,34 @@ unsigned int iio_scan_context_poll(struct iio_scan_context *ctx)
 	}
 #endif
 
-#if NETWORK_BACKEND
+#if USB_BACKEND && NETWORK_BACKEND
+	/* First poll with a timeout of 0, to return immediately if an event is
+	 * found; otherwise, in the case that we have an event on the network
+	 * backend and none on the USB backend, we would wait unnecessarily
+	 * for the timeout to expire. */
+	if (ctx->usb_ctx)
+		nb_events += usb_scan_poll(ctx->usb_ctx, 0);
 	if (ctx->ip_ctx)
-		nb_events += network_scan_poll(ctx->ip_ctx);
+		nb_events += network_scan_poll(ctx->ip_ctx, 0);
 #endif
 
+	/* If we had events so far, without blocking, return now */
+	if (nb_events)
+		return nb_events;
+
 #if USB_BACKEND
-	if (ctx->usb_ctx)
-		nb_events += usb_scan_poll(ctx->usb_ctx);
+	if (ctx->usb_ctx) {
+		nb_events += usb_scan_poll(ctx->usb_ctx, timeout_ms);
+
+		/* We timed out - we don't need to wait in the other backends */
+		if (!nb_events)
+			timeout_ms = 0;
+	}
+#endif
+
+#if NETWORK_BACKEND
+	if (ctx->ip_ctx)
+		nb_events += network_scan_poll(ctx->ip_ctx, timeout_ms);
 #endif
 
 	return nb_events;

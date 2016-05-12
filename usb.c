@@ -1024,12 +1024,13 @@ void usb_scan_destroy(struct iio_scan_backend_context *ctx)
 	free(ctx);
 }
 
-unsigned int usb_scan_poll(struct iio_scan_backend_context *ctx)
+unsigned int usb_scan_poll(struct iio_scan_backend_context *ctx,
+		unsigned int timeout_ms)
 {
 	struct timeval tv;
 
-	tv.tv_sec = 0;
-	tv.tv_usec = 0;
+	tv.tv_sec = timeout_ms / 1000;
+	tv.tv_usec = (timeout_ms % 1000) * 1000;
 	ctx->nb_events = 0;
 
 	if (ctx->enumerate) {
