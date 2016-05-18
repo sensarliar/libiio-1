@@ -895,7 +895,7 @@ err_free_connected_dev:
 	return -ENOMEM;
 }
 
-static int usb_hotplug_cb(struct libusb_context *usb_ctx,
+static int LIBUSB_CALL usb_hotplug_cb(struct libusb_context *usb_ctx,
 		struct libusb_device *dev, libusb_hotplug_event event,
 		void *user_data)
 {
