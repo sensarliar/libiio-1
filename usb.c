@@ -867,11 +867,11 @@ static int usb_hotplug_add_device(struct iio_scan_backend_context *ctx,
 	if (!connected_dev)
 		return -ENOMEM;
 
-	connected_dev->uri = strdup(uri);
+	connected_dev->uri = _strdup(uri);
 	if (!connected_dev->uri)
 		goto err_free_connected_dev;
 
-	connected_dev->description = strdup(description);
+	connected_dev->description = _strdup(description);
 	if (!connected_dev->description)
 		goto err_free_uri;
 
