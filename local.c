@@ -413,6 +413,13 @@ static ssize_t local_get_buffer(const struct iio_device *dev,
 	if (!addr_ptr)
 		return -EINVAL;
 
+
+	clock_gettime(CLOCK_MONOTONIC, &start);
+		ret = (ssize_t) device_check_ready(dev, POLLIN | POLLOUT, &start);
+		if (ret < 0)
+			return ret;
+
+
 	if (pdata->last_dequeued >= 0) {
 		struct block *last_block = &pdata->blocks[pdata->last_dequeued];
 

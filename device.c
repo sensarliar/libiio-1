@@ -445,6 +445,7 @@ ssize_t iio_device_get_sample_size_mask(const struct iio_device *dev,
 		else
 			size += length;
 	}
+size =8 ;
 	return size;
 }
 
